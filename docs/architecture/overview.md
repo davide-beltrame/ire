@@ -102,6 +102,10 @@ my_research_project/
 │   ├── resources/                   # git-tracked
 │   │   ├── _index.md                # Auto-generated resource catalog (path → one-line summary)
 │   │   └── <slug>.md                # One file per ingested paper/article (title + sources in frontmatter)
+│   ├── experiments/                 # git-tracked
+│   │   └── <NNN>-<slug>/            # One folder per experiment, created on start
+│   │       ├── EXPERIMENT.md        # Goal/context (wake_prompt) + command, uuid, started_at
+│   │       └── ...                  # Agent-written scripts, result files, notes
 │   └── cache/                       # ingestion temp + experiments/<uuid>/{stdout,stderr}.log (gitignored)
 └── ... user source code ...
 ```

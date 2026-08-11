@@ -55,9 +55,10 @@ pub fn initialize(path: &Path) -> Result<()> {
     let ire = path.join(".ire");
     let short_term = ire.join("short-term");
     let resources = ire.join("resources");
+    let experiments = ire.join("experiments");
     let cache = ire.join("cache");
 
-    for d in [&ire, &short_term, &resources, &cache] {
+    for d in [&ire, &short_term, &resources, &experiments, &cache] {
         fs::create_dir_all(d).with_context(|| format!("create {}", d.display()))?;
     }
 
@@ -181,6 +182,7 @@ mod tests {
             ".ire/short-term",
             ".ire/resources",
             ".ire/resources/_index.md",
+            ".ire/experiments",
             ".ire/cache",
             ".gitignore",
         ] {
