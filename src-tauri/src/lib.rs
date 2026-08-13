@@ -19,6 +19,8 @@ mod user_config;
 mod ire;
 mod workspace;
 
+use tauri::Manager;
+
 use session::SessionManager;
 use commands::chat::{
     chat_cancel, chat_reset_session, chat_send, generate_chat_title, submit_ask_answer,
@@ -73,9 +75,19 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
-        .setup(|_app| {
+        .setup(|app| {
             if !cfg!(debug_assertions) && user_config::analytics_enabled() {
                 analytics::track_app_launched(user_config::analytics_id());
+            }
+            // Second reconcile checkpoint (the first is a completed tool call):
+            // picks up edits made to `.ire/` while IRE was in the background.
+            if let Some(window) = app.get_webview_window("main") {
+                let handle = app.handle().clone();
+                window.on_window_event(move |event| {
+                    if let tauri::WindowEvent::Focused(true) = event {
+                        ire::reconcile(&handle);
+                    }
+                });
             }
             Ok(())
         })

@@ -4,6 +4,7 @@ use std::sync::Mutex;
 use serde::Serialize;
 
 use super::lock::WorkspaceLock;
+use crate::ire::{IreSnapshot, IreStore};
 
 #[derive(Debug, Clone, Serialize)]
 pub struct WorkspaceState {
@@ -32,12 +33,22 @@ impl WorkspaceState {
 
 pub struct WorkspaceHandle {
     pub state: WorkspaceState,
+    /// Per-file metadata `.ire/` had at the last checkpoint reconcile. Lives
+    /// here so it is created and dropped with the workspace it describes.
+    pub ire_snapshot: IreSnapshot,
     _lock: WorkspaceLock,
 }
 
 impl WorkspaceHandle {
     pub fn new(state: WorkspaceState, lock: WorkspaceLock) -> Self {
-        Self { state, _lock: lock }
+        // Primed from disk: the caller emits the hydrate burst right after, so
+        // the first checkpoint must not report the same state as a change.
+        let ire_snapshot = IreSnapshot::primed(&IreStore::new(state.path.clone()));
+        Self {
+            state,
+            ire_snapshot,
+            _lock: lock,
+        }
     }
 }
 

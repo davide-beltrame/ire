@@ -75,7 +75,7 @@ impl IreStore {
         }
     }
 
-    fn ire_path(&self) -> PathBuf {
+    pub(super) fn ire_path(&self) -> PathBuf {
         self.ire_dir.join("ire.json")
     }
 
@@ -268,7 +268,7 @@ fn apply_edit(
     serde_json::from_str(&updated).context("the edited ire.json is not valid against the schema")
 }
 
-fn emit_sections(app: &AppHandle, content: &IreContent) {
+pub(super) fn emit_sections(app: &AppHandle, content: &IreContent) {
     events::emit_notes_changed(app, events::EventSource::Mutation, &content.notes);
     events::emit_focus_changed(
         app,
@@ -280,7 +280,7 @@ fn emit_sections(app: &AppHandle, content: &IreContent) {
     events::emit_ideas_changed(app, events::EventSource::Mutation, &ideas);
 }
 
-fn hash(s: &str) -> String {
+pub(super) fn hash(s: &str) -> String {
     Sha256::digest(s.as_bytes())
         .iter()
         .map(|b| format!("{b:02x}"))
@@ -289,7 +289,7 @@ fn hash(s: &str) -> String {
 
 /// Extract `(title, sources)` from a resource file's frontmatter, with
 /// fallbacks: title → first `# ` heading → filename; sources → empty.
-fn resource_meta(content: &str, rel_path: &str) -> (String, Vec<String>) {
+pub(super) fn resource_meta(content: &str, rel_path: &str) -> (String, Vec<String>) {
     let (fm, body) = frontmatter::parse(content);
     let title = fm
         .as_ref()

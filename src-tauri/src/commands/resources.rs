@@ -523,6 +523,9 @@ fn start_resource_summary(
                                 "event": &event,
                             }),
                         );
+                        if matches!(event, StreamEvent::ToolDone { .. }) {
+                            crate::ire::reconcile(&app);
+                        }
                     };
                     cli.dispatch(&json, &mut state, &mut emit_event);
                 }

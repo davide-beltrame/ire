@@ -196,6 +196,9 @@ pub fn fire_wakeup(args: FireWakeupArgs<'_>) {
                     "event": &event,
                 }),
             );
+            if matches!(event, StreamEvent::ToolDone { .. }) {
+                crate::ire::reconcile(app);
+            }
         };
         cli.dispatch(&json, &mut state, &mut emit_event);
     }
