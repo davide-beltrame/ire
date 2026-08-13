@@ -3,6 +3,9 @@
 All notable changes to this project are documented in this file.
 
 ## [Unreleased]
+### Added
+- Changes made to `.ire/` outside the app are picked up after each tool call and when the window regains focus (#112)
+
 ### Fixed
 - Sidebar resize handle no longer gets stuck after dragging a panel closed (#109)
 
