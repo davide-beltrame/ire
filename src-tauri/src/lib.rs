@@ -81,11 +81,16 @@ pub fn run() {
             }
             // Second reconcile checkpoint (the first is a completed tool call):
             // picks up edits made to `.ire/` while IRE was in the background.
+            // Tauri dispatches window events on the UI thread and the pass is
+            // blocking I/O, so it is handed to a blocking task — via
+            // `tauri::async_runtime`, since this callback is not itself running
+            // inside the tokio runtime.
             if let Some(window) = app.get_webview_window("main") {
                 let handle = app.handle().clone();
                 window.on_window_event(move |event| {
                     if let tauri::WindowEvent::Focused(true) = event {
-                        ire::reconcile(&handle);
+                        let handle = handle.clone();
+                        tauri::async_runtime::spawn_blocking(move || ire::reconcile(&handle));
                     }
                 });
             }

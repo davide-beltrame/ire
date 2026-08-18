@@ -1,5 +1,5 @@
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
 
@@ -34,8 +34,10 @@ impl WorkspaceState {
 pub struct WorkspaceHandle {
     pub state: WorkspaceState,
     /// Per-file metadata `.ire/` had at the last checkpoint reconcile. Lives
-    /// here so it is created and dropped with the workspace it describes.
-    pub ire_snapshot: IreSnapshot,
+    /// here so it is created and dropped with the workspace it describes, and
+    /// behind its own lock so a reconcile pass can scan without holding
+    /// `ActiveWorkspace` for the duration.
+    pub ire_snapshot: Arc<Mutex<IreSnapshot>>,
     _lock: WorkspaceLock,
 }
 
@@ -43,7 +45,9 @@ impl WorkspaceHandle {
     pub fn new(state: WorkspaceState, lock: WorkspaceLock) -> Self {
         // Primed from disk: the caller emits the hydrate burst right after, so
         // the first checkpoint must not report the same state as a change.
-        let ire_snapshot = IreSnapshot::primed(&IreStore::new(state.path.clone()));
+        let ire_snapshot = Arc::new(Mutex::new(IreSnapshot::primed(&IreStore::new(
+            state.path.clone(),
+        ))));
         Self {
             state,
             ire_snapshot,

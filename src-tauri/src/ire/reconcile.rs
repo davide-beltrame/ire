@@ -7,9 +7,10 @@
 //!
 //! Two gates keep a pass cheap. Per-file `(mtime, size)` from the previous pass
 //! decides whether a file is read at all; the content hash of what was read
-//! decides whether an event is emitted. The second gate matters for `git`
-//! operations, which rewrite mtimes for every file they touch even when the
-//! bytes are identical.
+//! decides whether an event is emitted — for `ire.json`, one hash per emitted
+//! section, so a notes edit cannot re-emit focus. The second gate matters for
+//! `git` operations, which rewrite mtimes for every file they touch even when
+//! the bytes are identical.
 //!
 //! Only `ire.json` and `resources/*.md` are scanned — the two things the
 //! frontend mirrors in memory. `_SYSTEM.md`, `long-term.md` and `short-term/`
@@ -24,22 +25,68 @@ use std::time::SystemTime;
 use serde_json::json;
 use tauri::{AppHandle, Manager};
 
-use super::store::{emit_sections, hash, resource_meta, IreContent, IreStore};
+use super::store::{hash, resource_meta, IreContent, IreStore};
 use crate::events;
 use crate::workspace::state::ActiveWorkspace;
 
-/// What the previous pass saw for one file: the `(mtime, size)` gate plus the
-/// hash of the content it read.
+/// What the previous pass saw for one resource file: the `(mtime, size)` gate
+/// plus the hash of the content it read.
 struct FileMeta {
     mtime: Option<SystemTime>,
     size: u64,
     hash: String,
 }
 
+/// What the previous pass saw for `ire.json`: the `(mtime, size)` gate plus one
+/// hash per emitted section.
+struct IreMeta {
+    mtime: Option<SystemTime>,
+    size: u64,
+    notes: String,
+    focus: String,
+    ideas: String,
+}
+
+impl IreMeta {
+    /// Hash each emitted section on its own. A single hash over all three would
+    /// make a change to any one of them re-emit the other two, and a panel that
+    /// re-hydrates on an event it did not need loses whatever the user was
+    /// typing into it.
+    ///
+    /// Experiments are deliberately not hashed: the runner rewrites `ire.json`
+    /// on every status transition, and including them would turn that churn
+    /// into section events carrying no change.
+    fn of(
+        mtime: Option<SystemTime>,
+        size: u64,
+        content: &IreContent,
+        ideas: &serde_json::Value,
+    ) -> Self {
+        let focus = json!({
+            "research_question": content.focus.research_question,
+            "this_week": content.focus.this_week,
+        });
+        Self {
+            mtime,
+            size,
+            notes: hash(&content.notes),
+            focus: hash(&focus.to_string()),
+            ideas: hash(&ideas.to_string()),
+        }
+    }
+}
+
 /// One externally-originated change found by a pass.
 enum Change {
-    /// `ire.json` parsed and its content differs — notes/focus/ideas.
-    Ire(IreContent),
+    /// `ire.json` parsed and its `notes` differ.
+    Notes(String),
+    /// `ire.json` parsed and its `focus` differs.
+    Focus {
+        research_question: String,
+        this_week: String,
+    },
+    /// `ire.json` parsed and its `ideas` differ.
+    Ideas(serde_json::Value),
     /// A `resources/<slug>.md` payload, shaped like `list_resources`.
     Resource(serde_json::Value),
     /// A `resources/<slug>.md` that is no longer on disk.
@@ -50,7 +97,8 @@ enum Change {
 /// is created and dropped with the workspace it describes.
 #[derive(Default)]
 pub struct IreSnapshot {
-    files: HashMap<PathBuf, FileMeta>,
+    ire: Option<IreMeta>,
+    resources: HashMap<PathBuf, FileMeta>,
 }
 
 impl IreSnapshot {
@@ -69,7 +117,11 @@ impl IreSnapshot {
 
         let ire_path = store.ire_path();
         if let Some((mtime, size)) = gate(&ire_path) {
-            if !self.matches_gate(&ire_path, mtime, size) {
+            let settled = self
+                .ire
+                .as_ref()
+                .is_some_and(|m| m.mtime == mtime && m.size == size);
+            if !settled {
                 let raw = fs::read_to_string(&ire_path).unwrap_or_default();
                 // Parse before recording. A half-written or hand-corrupted
                 // file leaves the snapshot untouched so the next pass retries
@@ -79,10 +131,23 @@ impl IreSnapshot {
                 // `ire.json` must not do.
                 match serde_json::from_str::<IreContent>(&raw) {
                     Ok(content) => {
-                        let same = self.record(&ire_path, mtime, size, sections_hash(&content));
-                        if !same {
-                            changes.push(Change::Ire(content));
+                        let ideas =
+                            serde_json::to_value(&content.ideas).unwrap_or_else(|_| json!([]));
+                        let next = IreMeta::of(mtime, size, &content, &ideas);
+                        let prev = self.ire.as_ref();
+                        if prev.map(|p| &p.notes) != Some(&next.notes) {
+                            changes.push(Change::Notes(content.notes));
                         }
+                        if prev.map(|p| &p.focus) != Some(&next.focus) {
+                            changes.push(Change::Focus {
+                                research_question: content.focus.research_question,
+                                this_week: content.focus.this_week,
+                            });
+                        }
+                        if prev.map(|p| &p.ideas) != Some(&next.ideas) {
+                            changes.push(Change::Ideas(ideas));
+                        }
+                        self.ire = Some(next);
                     }
                     Err(e) => {
                         tracing::warn!(error = %e, "reconcile: ire.json did not parse, keeping last known state");
@@ -124,13 +189,13 @@ impl IreSnapshot {
         // unreadable `resources/` must not read as "every resource is gone".
         if listed {
             let gone: Vec<PathBuf> = self
-                .files
+                .resources
                 .keys()
                 .filter(|p| p.starts_with(&store.resources_dir) && !seen.contains(*p))
                 .cloned()
                 .collect();
             for path in gone {
-                self.files.remove(&path);
+                self.resources.remove(&path);
                 changes.push(Change::ResourceDeleted(rel_resource_path(&path)));
             }
         }
@@ -139,7 +204,7 @@ impl IreSnapshot {
     }
 
     fn matches_gate(&self, path: &Path, mtime: Option<SystemTime>, size: u64) -> bool {
-        self.files
+        self.resources
             .get(path)
             .is_some_and(|f| f.mtime == mtime && f.size == size)
     }
@@ -147,8 +212,8 @@ impl IreSnapshot {
     /// Store what this pass read. Returns whether the content hash is the one
     /// the previous pass already reported.
     fn record(&mut self, path: &Path, mtime: Option<SystemTime>, size: u64, hash: String) -> bool {
-        let same = self.files.get(path).is_some_and(|f| f.hash == hash);
-        self.files
+        let same = self.resources.get(path).is_some_and(|f| f.hash == hash);
+        self.resources
             .insert(path.to_path_buf(), FileMeta { mtime, size, hash });
         same
     }
@@ -157,28 +222,67 @@ impl IreSnapshot {
 /// Reconcile `.ire/` with the app's in-memory state and emit what moved. A
 /// no-op when no workspace is open.
 ///
+/// Blocking: it stats, reads and hashes `.ire/`. Call it from a blocking task,
+/// never from an async worker or the UI thread.
+///
 /// Experiments are read from `ire.json` but never emitted here: their rows
 /// carry live tab linkage owned by the experiment runner, and re-emitting the
 /// git-tracked copy would drop it.
 pub fn reconcile(app: &AppHandle) {
+    // The `ActiveWorkspace` lock is held just long enough to copy what the scan
+    // needs — every other command that wants it (`chat_send`, `close_workspace`)
+    // would otherwise queue behind the whole pass. The snapshot then serialises
+    // on its own lock, so two overlapping checkpoints can't both report the
+    // same change.
     let active = app.state::<ActiveWorkspace>();
-    let Ok(mut guard) = active.0.lock() else {
+    let (root, snapshot) = {
+        let Ok(guard) = active.0.lock() else {
+            return;
+        };
+        let Some(handle) = guard.as_ref() else {
+            return;
+        };
+        (handle.state.path.clone(), handle.ire_snapshot.clone())
+    };
+
+    let store = IreStore::new(root.clone());
+    let Ok(mut snapshot) = snapshot.lock() else {
         return;
     };
-    let Some(handle) = guard.as_mut() else {
-        return;
-    };
-    let store = IreStore::new(handle.state.path.clone());
-    let changes = handle.ire_snapshot.scan(&store);
-    drop(guard);
+    let changes = snapshot.scan(&store);
+    drop(snapshot);
 
     if changes.is_empty() {
+        return;
+    }
+    // Not holding `ActiveWorkspace` across the scan means the workspace can
+    // close during one. Emitting then would repopulate the panels of a
+    // workspace the user has already left, so re-check before saying anything.
+    let still_open = active
+        .0
+        .lock()
+        .is_ok_and(|guard| guard.as_ref().is_some_and(|h| h.state.path == root));
+    if !still_open {
         return;
     }
     tracing::info!(changes = changes.len(), "reconciled external .ire changes");
     for change in changes {
         match change {
-            Change::Ire(content) => emit_sections(app, &content),
+            Change::Notes(notes) => {
+                events::emit_notes_changed(app, events::EventSource::Mutation, &notes)
+            }
+            Change::Focus {
+                research_question,
+                this_week,
+            } => events::emit_focus_changed(
+                app,
+                events::EventSource::Mutation,
+                &research_question,
+                &this_week,
+            ),
+            Change::Ideas(ideas) => {
+                events::emit_ideas_changed(app, events::EventSource::Mutation, &ideas)
+            }
             Change::Resource(resource) => {
                 events::emit_resource_changed(app, events::EventSource::Mutation, &resource)
             }
@@ -193,18 +297,6 @@ pub fn reconcile(app: &AppHandle) {
 fn gate(path: &Path) -> Option<(Option<SystemTime>, u64)> {
     let meta = fs::metadata(path).ok()?;
     Some((meta.modified().ok(), meta.len()))
-}
-
-/// Hash only the sections reconcile emits. The experiment runner rewrites
-/// `ire.json` on every status transition, and hashing the whole file would turn
-/// that churn into notes/focus/ideas events carrying no change.
-fn sections_hash(content: &IreContent) -> String {
-    let sections = json!({
-        "notes": content.notes,
-        "focus": content.focus,
-        "ideas": content.ideas,
-    });
-    hash(&sections.to_string())
 }
 
 /// Same filter as `list_resources`: `*.md`, skipping `_index.md` and dotfiles.
@@ -234,18 +326,37 @@ mod tests {
         (dir, store)
     }
 
-    fn write_ire(store: &IreStore, notes: &str) {
+    fn write_ire_parts(store: &IreStore, notes: &str, research_question: &str, ideas: &str) {
         let content = format!(
-            "{{\"notes\":\"{notes}\",\"focus\":{{\"research_question\":\"\",\"this_week\":\"\"}},\"ideas\":[],\"experiments\":[]}}\n"
+            "{{\"notes\":\"{notes}\",\"focus\":{{\"research_question\":\"{research_question}\",\
+             \"this_week\":\"\"}},\"ideas\":{ideas},\"experiments\":[]}}\n"
         );
         fs::write(store.ire_path(), content).unwrap();
+    }
+
+    fn write_ire(store: &IreStore, notes: &str) {
+        write_ire_parts(store, notes, "", "[]");
+    }
+
+    /// Which events a pass would emit, in order.
+    fn kinds(changes: &[Change]) -> Vec<&'static str> {
+        changes
+            .iter()
+            .map(|c| match c {
+                Change::Notes(_) => "notes",
+                Change::Focus { .. } => "focus",
+                Change::Ideas(_) => "ideas",
+                Change::Resource(_) => "resource",
+                Change::ResourceDeleted(_) => "resource-deleted",
+            })
+            .collect()
     }
 
     fn notes_of(changes: &[Change]) -> Vec<String> {
         changes
             .iter()
             .filter_map(|c| match c {
-                Change::Ire(content) => Some(content.notes.clone()),
+                Change::Notes(notes) => Some(notes.clone()),
                 _ => None,
             })
             .collect()
@@ -301,6 +412,36 @@ mod tests {
         assert_eq!(notes_of(&snap.scan(&s)), ["after an external edit"]);
         // Second pass sees settled metadata and stays quiet.
         assert!(snap.scan(&s).is_empty());
+    }
+
+    #[test]
+    fn a_notes_edit_emits_only_notes() {
+        let (_d, s) = store();
+        write_ire_parts(&s, "before", "the question", "[{\"text\":\"an idea\"}]");
+        let mut snap = IreSnapshot::primed(&s);
+
+        write_ire_parts(&s, "after", "the question", "[{\"text\":\"an idea\"}]");
+        assert_eq!(kinds(&snap.scan(&s)), ["notes"]);
+    }
+
+    #[test]
+    fn a_focus_edit_emits_only_focus() {
+        let (_d, s) = store();
+        write_ire_parts(&s, "steady", "before", "[{\"text\":\"an idea\"}]");
+        let mut snap = IreSnapshot::primed(&s);
+
+        write_ire_parts(&s, "steady", "after", "[{\"text\":\"an idea\"}]");
+        assert_eq!(kinds(&snap.scan(&s)), ["focus"]);
+    }
+
+    #[test]
+    fn an_ideas_edit_emits_only_ideas() {
+        let (_d, s) = store();
+        write_ire_parts(&s, "steady", "the question", "[]");
+        let mut snap = IreSnapshot::primed(&s);
+
+        write_ire_parts(&s, "steady", "the question", "[{\"text\":\"an idea\"}]");
+        assert_eq!(kinds(&snap.scan(&s)), ["ideas"]);
     }
 
     #[test]

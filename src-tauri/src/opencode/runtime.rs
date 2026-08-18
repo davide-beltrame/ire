@@ -279,9 +279,12 @@ async fn handle_event(
             }
             // Reconcile checkpoint, off the session lock: the agent can write
             // `.ire/` with its built-in tools, not just through `IreStore`.
+            // It reads and hashes `.ire/`, so it goes to a blocking task rather
+            // than stalling the worker driving this SSE stream.
             drop(guard);
             if tool_done {
-                crate::ire::reconcile(app);
+                let app = app.clone();
+                tokio::task::spawn_blocking(move || crate::ire::reconcile(&app));
             }
         }
         OpenCodeEvent::SessionIdle { session_id } => {
