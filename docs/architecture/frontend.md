@@ -199,11 +199,11 @@ A single typed channel carrying workspace-level state changes for the side panel
 
 | `kind` | Payload (excl. `source`) | Emitted from |
 |---|---|---|
-| `focus-changed` | `{ research_question, this_week }` | `ire.json` writes (UI setters / `ire.edit`); initial-state burst |
-| `notes-changed` | `{ content }` | `ire.json` writes; initial-state burst |
-| `ideas-changed` | `{ ideas: { text }[] }` | `ire.json` writes; initial-state burst |
-| `resource-changed` | `{ resource: { path, title, sources } }` | `IreStore::write_resource` on `resources/*.md`; initial-state burst |
-| `resource-deleted` | `{ path }` | `discard_resource` / `IreStore::delete_resource` |
+| `focus-changed` | `{ research_question, this_week }` | `ire.json` writes (UI setters / `ire.edit`); initial-state burst; checkpoint reconcile |
+| `notes-changed` | `{ content }` | `ire.json` writes; initial-state burst; checkpoint reconcile |
+| `ideas-changed` | `{ ideas: { text }[] }` | `ire.json` writes; initial-state burst; checkpoint reconcile |
+| `resource-changed` | `{ resource: { path, title, sources } }` | `IreStore::write_resource` on `resources/*.md`; initial-state burst; checkpoint reconcile |
+| `resource-deleted` | `{ path }` | `discard_resource` / `IreStore::delete_resource`; checkpoint reconcile |
 | `experiment-changed` | `{ experiment: ExperimentRow }` | `experiments/runner.rs` on state transitions; initial-state burst |
 | `experiment-deleted` | `{ uuid }` | `experiment_delete` command |
 
@@ -218,3 +218,5 @@ At the end of `attach()` in `commands/workspace.rs`, `emit_initial_state(app, wo
 3. `ire.json` `experiments` → one `experiment-changed` per entry (tab_id empty on hydrate; live linkage via events).
 
 Every event in the burst carries `source: "hydrate"`. Live mutations carry `source: "mutation"`. Animation listeners can filter to `source === "mutation"` to avoid flashing every panel on workspace open.
+
+Changes made to `.ire/` outside the app arrive on the same channel with `source: "mutation"`, emitted by the checkpoint reconcile after a completed tool call or on window focus — see [workspace.md](workspace.md#concurrency--data-safety). Reconcile emits only the `ire.json` section events and the resource events; there is no reconcile path for `experiment-changed`.

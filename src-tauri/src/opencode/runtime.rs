@@ -271,9 +271,20 @@ async fn handle_event(
             let stream_id = route.stream_id.clone();
             let mut pending = Vec::new();
             events::normalize_part(&part, &mut route.state, &mut |e| pending.push(e));
+            let mut tool_done = false;
             for event in pending {
                 route.event_id += 1;
                 emit_stream(app, &tab_id, &stream_id, route.event_id, &event);
+                tool_done |= matches!(event, StreamEvent::ToolDone { .. });
+            }
+            // Reconcile checkpoint, off the session lock: the agent can write
+            // `.ire/` with its built-in tools, not just through `IreStore`.
+            // It reads and hashes `.ire/`, so it goes to a blocking task rather
+            // than stalling the worker driving this SSE stream.
+            drop(guard);
+            if tool_done {
+                let app = app.clone();
+                tokio::task::spawn_blocking(move || crate::ire::reconcile(&app));
             }
         }
         OpenCodeEvent::SessionIdle { session_id } => {

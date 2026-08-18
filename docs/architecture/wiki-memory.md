@@ -61,6 +61,7 @@ The git-tracked record of shareable state. Read/written through `IreStore` (`src
 - `update_ire(app, mutate)` — UI setters (`save_notes`, `save_focus_field`, `save_ideas`) take this path: read-modify-write under a process-wide `IRE_LOCK`, then emit the `notes-changed` / `focus-changed` / `ideas-changed` events.
 - `edit_ire(old, new, version, app)` — backs the `ire.edit` MCP tool. Validates `version` against the current on-disk hash (rejects a stale/missing version), requires `old` to be present and **unique**, applies the replacement, re-parses against the schema, writes, and emits the section events. The pure core is `apply_edit` (unit-tested).
 - `upsert_experiment` / `remove_experiment` — the experiment runner and commands mirror DB rows into `ire.json` here; these **do not** emit section events (`experiment-changed` is owned by the runner).
+- `ire::reconcile(app)` (`src-tauri/src/ire/reconcile.rs`) — re-reads `ire.json` and `resources/*.md` at safe checkpoints and emits the section and resource events for anything that changed outside the app. Gated on per-file `(mtime, size)` and then on a per-section content hash, so an unchanged pass reads nothing and a change to one section does not re-emit the others; experiments are deliberately not emitted. See [workspace.md](workspace.md#concurrency--data-safety).
 
 Experiment rows are duplicated between `ire.json` and `local.db` — see [experiments.md — Data model](experiments.md#data-model).
 

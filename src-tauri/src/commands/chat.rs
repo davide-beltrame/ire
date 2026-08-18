@@ -191,6 +191,11 @@ pub async fn chat_send(
                             "event": &event,
                         }),
                     );
+                    // Reconcile checkpoint: the agent can write `.ire/` with
+                    // its built-in tools, not just through `IreStore`.
+                    if matches!(event, StreamEvent::ToolDone { .. }) {
+                        crate::ire::reconcile(&app_handle);
+                    }
                 };
                 cli.dispatch(&json, &mut state, &mut emit_event);
             }
