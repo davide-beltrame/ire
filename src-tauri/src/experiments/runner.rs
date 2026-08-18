@@ -55,7 +55,21 @@ pub fn start_experiment(
     let stdout_file = File::create(exp_dir.join("stdout.log")).context("create stdout.log")?;
     let stderr_file = File::create(exp_dir.join("stderr.log")).context("create stderr.log")?;
 
-    db::insert_experiment(
+    // One timestamp for the DB row, ire.json, and EXPERIMENT.md.
+    let started_at = chrono::Local::now().to_rfc3339();
+    let record_dir = super::record::create(
+        workspace_root,
+        super::record::RecordArgs {
+            uuid: &uuid,
+            name: &name,
+            command: &command,
+            working_dir: &working_dir.to_string_lossy(),
+            wake_prompt: &wake_prompt,
+            started_at: &started_at,
+        },
+    )?;
+
+    let started = db::insert_experiment(
         &home_data_dir,
         &uuid,
         &name,
@@ -64,9 +78,18 @@ pub fn start_experiment(
         &wake_prompt,
         &session_uuid,
         &tab_id,
-    )?;
+        &started_at,
+    )
+    .and_then(|()| spawn_detached(&command, &working_dir, stdout_file, stderr_file));
 
-    let child = spawn_detached(&command, &working_dir, stdout_file, stderr_file)?;
+    let child = match started {
+        Ok(c) => c,
+        Err(e) => {
+            // Nothing ran — don't leave an orphan folder in the wiki.
+            super::record::remove(workspace_root, &record_dir);
+            return Err(e);
+        }
+    };
     let pid = child.id();
     tracing::info!(uuid = %uuid, pid = pid, name = %name, "experiment spawned");
 
@@ -96,6 +119,7 @@ pub fn start_experiment(
         model,
         effort,
         wake_prompt,
+        record_dir: record_dir.clone(),
         app: app.clone(),
         session_manager,
     };
@@ -109,7 +133,7 @@ pub fn start_experiment(
         }
     });
 
-    Ok(serde_json::json!({ "uuid": uuid, "status": "started" }))
+    Ok(serde_json::json!({ "uuid": uuid, "status": "started", "dir": record_dir }))
 }
 
 // ── internal ──────────────────────────────────────────────────────────────────
@@ -124,6 +148,7 @@ struct MonitorArgs {
     model: String,
     effort: Option<String>,
     wake_prompt: String,
+    record_dir: String,
     app: AppHandle,
     session_manager: SessionManager,
 }
@@ -159,6 +184,7 @@ fn monitor(mut child: Child, args: MonitorArgs) {
         model,
         effort,
         wake_prompt,
+        record_dir,
         app,
         session_manager,
     } = args;
@@ -235,6 +261,7 @@ fn monitor(mut child: Child, args: MonitorArgs) {
                     model: &model,
                     effort: effort.as_deref(),
                     wake_prompt: &wake_prompt,
+                    record_dir: &record_dir,
                     app: &app,
                     session_manager: &session_manager,
                 });

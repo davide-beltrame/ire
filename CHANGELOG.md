@@ -4,6 +4,7 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 ### Added
+- Git-tracked `.ire/experiments/<NNN>-<slug>/` folder per experiment, with an `EXPERIMENT.md` recording the goal, command, and start time (#106)
 - Changes made to `.ire/` outside the app are picked up after each tool call and when the window regains focus (#112)
 
 ### Fixed

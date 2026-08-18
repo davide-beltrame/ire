@@ -2,6 +2,7 @@
 
 Experiment uuid: {uuid}
 Exit code: {exit_code}
+Experiment folder: {record_dir}/ — read `EXPERIMENT.md` there for the original goal, and write any result files, notes, or scripts worth keeping into that folder.
 
 stdout tail:
 {stdout_tail}

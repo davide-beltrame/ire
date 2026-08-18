@@ -37,8 +37,8 @@ T2  MCP server forwards to IRE's Rust backend, which inserts an experiment row
              .process_group(0)             // setsid
              .env_remove("CLAUDECODE")
              .spawn()
-    returning { uuid, status: "started" } to the agent — see Data model and
-    Spawn & monitor below.
+    returning { uuid, status: "started", dir } to the agent — see Data model
+    and Spawn & monitor below.
 T3  Agent's response to the user: "Started experiment <uuid>; I'll come back
     when it's done." Then this agent turn ENDS naturally.
 T4  Backend monitor thread polls the child every 500ms and tails new log
@@ -60,8 +60,22 @@ Rendering of the running/finished experiment in the UI is covered in
 
 ## Data model
 
-Experiments are **duplicated by design** across two stores:
+Experiments are **duplicated by design** across three stores:
 
+- **`.ire/experiments/<NNN>-<slug>/`** (git-tracked, the durable human-readable record)
+  — created on start by `experiments::record` (`src-tauri/src/experiments/record.rs`).
+  `EXPERIMENT.md` holds the goal and context (the `wake_prompt`, which otherwise exists
+  only in `local.db`) plus `uuid`, `started_at`, `working_dir`, and the command in a
+  fenced block. The rest of the folder is the run's own home for scripts, result files,
+  and notes.
+
+  `<NNN>` is a zero-padded three-digit prefix, allocated as one past the highest already
+  present — gaps from deleted folders are never reissued. Allocation and folder creation
+  happen under an in-process mutex, so two experiments starting at once can't claim the
+  same number. `<slug>` is the name lowercased to ASCII alphanumerics with every other
+  run of characters collapsed to `-`, capped at 60 characters (`experiment` if nothing
+  survives). The folder is created before the subprocess spawns and removed again if the
+  DB insert or the spawn fails, so a folder implies a run that actually started.
 - **`ire.json`** (git-tracked, the shareable display subset) — `IreExperiment` in
   `src-tauri/src/ire/store.rs`:
   ```json
@@ -114,9 +128,15 @@ returning and the `experiment-starting` event linking a `uuid`/`pid` to the pend
 card (see [Frontend & UI](#frontend--ui)); it never appears in the DB or `ire.json`,
 whose `status` starts directly at `"running"`.
 
-Logs are not part of either record: stdout/stderr stream to
+Logs are not part of any of the three: stdout/stderr stream to
 `.ire/cache/experiments/<uuid>/{stdout,stderr}.log` (gitignored), read on demand by
-`experiment.tail_logs` / `experiment_logs`.
+`experiment.tail_logs` / `experiment_logs`. Keeping raw logs local while the curated
+record is git-tracked is a deliberate split — see
+[experiment-lifecycle-v2.md](../proposals/experiment-lifecycle-v2.md).
+
+`started_at` is generated once in `start_experiment` and passed to
+`db::insert_experiment`, so the DB row, the `ire.json` mirror, and `EXPERIMENT.md` all
+carry the same timestamp.
 
 ---
 
@@ -146,7 +166,7 @@ general MCP catalog format in [mcp.md — Tool Catalog](mcp.md#tool-catalog)):
 
 | Tool | Params | Notes |
 |---|---|---|
-| `experiment.start` | `name` (required), `command` (required, `sh -c` string), `working_dir` (optional, defaults to workspace root), `wake_prompt` (required) | Returns `{ uuid, status: "started" }` immediately. |
+| `experiment.start` | `name` (required), `command` (required, `sh -c` string), `working_dir` (optional, defaults to workspace root), `wake_prompt` (required) | Returns `{ uuid, status: "started", dir }` immediately, where `dir` is the workspace-relative wiki folder for the run. |
 | `experiment.status` | `uuid` (required) | Returns `{ status, exit_code?, started_at, ended_at? }`. |
 | `experiment.tail_logs` | `uuid` (required), `kb` (optional, default 64) | Tail of stdout/stderr from `.ire/cache/experiments/<uuid>/`. |
 
@@ -161,8 +181,11 @@ from `ire.json` via `ire.read` instead.
 
 `start_experiment` (`src-tauri/src/experiments/runner.rs`):
 
-1. Generates a `uuid`, creates `.ire/cache/experiments/<uuid>/{stdout,stderr}.log`,
-   inserts a `status='running'` DB row (`db::insert_experiment`).
+1. Generates a `uuid` and a canonical `started_at`, creates
+   `.ire/cache/experiments/<uuid>/{stdout,stderr}.log`, creates the wiki record
+   `.ire/experiments/<NNN>-<slug>/EXPERIMENT.md` (`experiments::record::create`), then
+   inserts a `status='running'` DB row (`db::insert_experiment`). If the insert or the
+   spawn in step 2 fails, `experiments::record::remove` deletes the folder again.
 2. Spawns the command detached (`spawn_detached`): `sh -c <command>`, `stdin(Stdio::null())`,
    its own process group (`process_group(0)` / `setsid` on Unix, `CREATE_NEW_PROCESS_GROUP`
    on Windows), `CLAUDECODE` removed from the environment — so killing IRE, or the agent
@@ -196,7 +219,8 @@ that started the experiment:
 
 1. Reads the last 8KB of `stdout.log`/`stderr.log` (`tail_file`) and composes the
    wake-up message from the seed template `src-tauri/assets/prompts/experiment_wakeup.md`
-   (embeds `wake_prompt`, `uuid`, `exit_code`, and both log tails). On exit code 126/127
+   (embeds `wake_prompt`, `uuid`, `exit_code`, the wiki folder path, and both log tails),
+   pointing the agent at `EXPERIMENT.md` and at that folder for result files. On exit code 126/127
    (permission denied / command not found) that template tells the agent not to retry
    `experiment.start` — report to the user and stop instead.
 2. Rebuilds the composed system prompt (`build_system_prompt`) exactly as a normal turn
@@ -238,7 +262,10 @@ UI (not exposed to the agent via MCP):
   usual — so the agent still gets woken up, now seeing `status: "cancelled"`.
 - **`experiment_delete({ uuid })`** — rejected while `status` is `"running"` or
   `"starting"`. Otherwise removes the `.ire/cache/experiments/<uuid>/` log directory,
-  the DB row, and the `ire.json` entry, and emits `experiment-deleted`.
+  the DB row, and the `ire.json` entry, and emits `experiment-deleted`. The git-tracked
+  `.ire/experiments/<NNN>-<slug>/` folder is **left in place** — it is wiki content that
+  may hold user- or agent-written artifacts, so removing an experiment from the sidebar
+  does not delete it. Its `<NNN>` is not reissued either.
 - **`experiment_rename({ uuid, name })`** — updates `name` only, re-syncs to `ire.json`,
   emits `experiment-changed`.
 

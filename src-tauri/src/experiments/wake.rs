@@ -21,6 +21,7 @@ pub struct FireWakeupArgs<'a> {
     pub model: &'a str,
     pub effort: Option<&'a str>,
     pub wake_prompt: &'a str,
+    pub record_dir: &'a str,
     pub app: &'a AppHandle,
     pub session_manager: &'a SessionManager,
 }
@@ -36,6 +37,7 @@ pub fn fire_wakeup(args: FireWakeupArgs<'_>) {
         model,
         effort,
         wake_prompt,
+        record_dir,
         app,
         session_manager,
     } = args;
@@ -61,6 +63,7 @@ pub fn fire_wakeup(args: FireWakeupArgs<'_>) {
         wake_prompt,
         uuid,
         exit_code,
+        record_dir,
         stdout_tail: &stdout_tail,
         stderr_tail: &stderr_tail,
     });

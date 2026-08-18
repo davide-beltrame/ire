@@ -17,6 +17,7 @@ The store layer is rooted at `.ire/` (`src-tauri/src/ire/`). There is no longer 
   resources/            git-tracked
     _index.md           auto-generated (resources only)
     <slug>.md
+  experiments/          git-tracked  — <NNN>-<slug>/EXPERIMENT.md + the run's own artifacts
   cache/                gitignored   — ingestion temp + experiments/<uuid>/{stdout,stderr}.log
 ```
 

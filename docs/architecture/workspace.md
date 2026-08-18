@@ -47,7 +47,7 @@ On startup, `App.tsx` calls `setup_status` and `read_user_config` in parallel. `
 2. Backend:
    - `git init` if no `.git/`.
    - Scaffold `.ire/` per the directory layout in [overview.md](overview.md#directory-layout).
-   - Create `.ire/{resources,short-term,cache}` and write seed files: `.ire/_SYSTEM.md` (canned framework context), `.ire/ire.json` (seed notes/focus/ideas/experiments), `.ire/long-term.md`, and an empty `resources/_index.md`.
+   - Create `.ire/{resources,short-term,experiments,cache}` and write seed files: `.ire/_SYSTEM.md` (canned framework context), `.ire/ire.json` (seed notes/focus/ideas/experiments), `.ire/long-term.md`, and an empty `resources/_index.md`.
    - Append IRE entries to `.gitignore` (create if missing).
    - Do not stage or commit; the user decides when to commit the initialized workspace.
 3. Continue from step 3 of Open existing above.
