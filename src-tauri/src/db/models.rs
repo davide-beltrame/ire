@@ -30,13 +30,13 @@ pub fn insert_experiment(
     wake_prompt: &str,
     session_id: &str,
     tab_id: &str,
+    started_at: &str,
 ) -> Result<()> {
     let conn = open(home_data_dir)?;
-    let now = chrono::Local::now().to_rfc3339();
     conn.execute(
         "INSERT INTO experiments (uuid, name, command, working_dir, status, started_at, wake_prompt, session_id, tab_id) \
          VALUES (?1, ?2, ?3, ?4, 'running', ?5, ?6, ?7, ?8)",
-        params![uuid, name, command, working_dir, now, wake_prompt, session_id, tab_id],
+        params![uuid, name, command, working_dir, started_at, wake_prompt, session_id, tab_id],
     )?;
     Ok(())
 }

@@ -242,7 +242,7 @@ fn tool_catalog() -> Vec<Tool> {
         ),
         tool(
             "experiment.start",
-            "Spawn a detached experiment subprocess. Returns immediately with a uuid. IRE will wake you up via --resume when the process finishes.",
+            "Spawn a detached experiment subprocess. Returns immediately with a uuid and `dir`, the experiment's wiki folder — write scripts, result files, and other artifacts worth keeping there. IRE will wake you up via --resume when the process finishes.",
             json!({
                 "type": "object",
                 "properties": {

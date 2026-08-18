@@ -19,6 +19,7 @@ The `.ire/` folder lives in the project root and contains:
 .ire/long-term.md      — architectural decisions and durable insights
 .ire/short-term/       — daily agent notes (YYYY-MM-DD.md)
 .ire/resources/        — one markdown file per resource, plus an auto-generated _index.md
+.ire/experiments/      — one folder per experiment (NNN-slug/), created by IRE on start
 .ire/cache/            — local-only: ingestion temp + experiment logs (gitignored)
 ```
 
@@ -45,6 +46,8 @@ The central file is `ire.json`:
    - **focus**: update `research_question` / `this_week` when research direction or weekly focus changes.
    - **ideas**: an ordered array of `{ "text": … }`.
    - **experiments**: managed by IRE — read-only, do not hand-edit.
+
+   Each experiment also gets a git-tracked folder, `.ire/experiments/<NNN>-<slug>/`, created by IRE when it starts. Its `EXPERIMENT.md` records the goal, command, and start time; IRE owns that file, so leave it alone. The rest of the folder is yours: put the experiment's scripts, result files, and notes there so the run stays legible on its own.
 
 3. **Memory.** Write architectural decisions, pivots, and durable "do not repeat" lessons to `long-term.md` via `memory.write_long_term`. Write daily operational notes, debugging steps, and transient dead ends to today's file via `memory.write_short_term`. Only today and yesterday are auto-injected — promote anything still relevant to long-term before it ages out. Keep entries minimal and functional; only track what is genuinely useful for future sessions.
 

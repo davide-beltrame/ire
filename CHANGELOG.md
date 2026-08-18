@@ -3,6 +3,8 @@
 All notable changes to this project are documented in this file.
 
 ## [Unreleased]
+### Added
+- Git-tracked `.ire/experiments/<NNN>-<slug>/` folder per experiment, with an `EXPERIMENT.md` recording the goal, command, and start time (#106)
 ### Fixed
 - Sidebar resize handle no longer gets stuck after dragging a panel closed (#109)
 

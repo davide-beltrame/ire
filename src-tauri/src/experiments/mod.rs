@@ -1,3 +1,4 @@
+pub mod record;
 pub mod runner;
 pub mod wake;
 
